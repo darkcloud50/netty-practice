@@ -59,7 +59,7 @@ public class LogEventMonitor {
             System.out.println("Monitor is running");
             channel.closeFuture().sync();
         } finally {
-            monitor.clone();
+            monitor.stop();
         }
     }
 
