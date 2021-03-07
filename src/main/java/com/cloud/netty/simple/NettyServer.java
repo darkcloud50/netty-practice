@@ -58,7 +58,7 @@ public class NettyServer {
 
             System.out.println(".....服务器 is ready...");
 
-            // 绑定一个端口并且同步, 生成了一个 ChannelFuture 对象
+            // 绑定一个端口并且同步, 生成了一个 ChannelFuture 对象(调用sync()方法阻塞等待直到绑定完成)
             // 启动服务器(并绑定端口)
             final ChannelFuture cf = bootstrap.bind(6668).sync();
 
@@ -76,10 +76,11 @@ public class NettyServer {
 
             });
 
-            // 对关闭通道进行监听
+            // 对关闭通道进行监听（获取Channel的closeFuture，并且阻塞当前线程直到它完成）
             cf.channel().closeFuture().sync();
 
         } finally {
+            // 关闭 EventLoopGroup，释放所有的资源
             bossGroup.shutdownGracefully();
             workerGroup.shutdownGracefully();
         }
