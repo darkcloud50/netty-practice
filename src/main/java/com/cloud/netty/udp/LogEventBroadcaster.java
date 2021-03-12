@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets;
  * LogEventBroadcaster
  * <p>
  * ncat下载地址: http://nmap.org/dist/ncat-portable-5.59BETA1.zip
- * 使用命令: ncat -l -u -p 9090
+ * 使用命令: ncat -l -u -p 9090 或 ncat -lu 127.0.0.1 9090
  *
  * @author: cloud
  * @date: 2021/3/5 10:54
