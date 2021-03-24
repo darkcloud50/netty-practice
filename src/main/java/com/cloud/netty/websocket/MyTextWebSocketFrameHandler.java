@@ -13,6 +13,23 @@ import java.time.LocalDateTime;
  */
 public class MyTextWebSocketFrameHandler extends SimpleChannelInboundHandler<TextWebSocketFrame> {
 
+
+    /*
+    @Override
+    protected void initChannel(final Channel ch) {
+        ChannelPipeline p = ch.pipeline();
+        p.addLast(new HttpRequestDecoder());
+        p.addLast(new HttpResponseEncoder());
+        p.addLast(new InHandler1());
+        p.addLast(new InHandler2());
+        p.addLast(new OutHandler1());
+        p.addLast(new OutHandler2());
+    }
+
+    如果在 InHandler2 中, 调用了 write(...) 则不会触发调用 OutHandler2 和 OutHandler1 的, 因为 ctx.write(...) 只会触发离它最近的 out handler, 但是, InHandler2 前面没有 out handler了~
+    但, 如果通过 channel.write(...)的话, 则它会从 OutHandler2 -> OutHandler1 这样子流穿
+    */
+
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TextWebSocketFrame msg) throws Exception {
 
