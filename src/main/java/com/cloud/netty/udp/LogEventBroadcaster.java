@@ -19,6 +19,12 @@ import java.nio.charset.StandardCharsets;
  * ncat下载地址: http://nmap.org/dist/ncat-portable-5.59BETA1.zip
  * 使用命令: ncat -l -u -p 9090 或 ncat -lu 127.0.0.1 9090
  *
+ * https://stackoverflow.com/questions/37656161/netty-udp-server-bootstrap/37681245#37681245
+ * From what I found out: Bootstrap is the correct entry point for UDP Servers in Netty 4.x
+ * And there is no need for NioServerDatagramChannel, because UDP servers open one channel for all clients.
+ *   ServerBootstrap allows many client to connect via its channel. Therefore TCP has a dedicated ServerSocketChannel.
+ *   Bootstrap is used to create channels for single connections. Because UDP has one channel for all clients it makes sense that only the Bootstrap is requried. All clients bind to the same channel.
+ *
  * @author: cloud
  * @date: 2021/3/5 10:54
  * @version: 1.0.0
