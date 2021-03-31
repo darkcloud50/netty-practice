@@ -25,7 +25,29 @@
   没有发送给客户端，这可能会触发客户端的I/O异常，或者恰好发生了超时异常，客户端需要对I/O或超时异常做容错处理，采用Failover重试其它
   可用的服务端，而不能寄希望于服务端永远正确。Netty优雅退出更重要的是保证资源、句柄、线程的快速释放、以及相关对象的清理。  
   5.3 Netty优雅退出通常用于应用进程退出时，在应用ShutdownHook中调用EventLoopGroup的shutdownGracefully(long quietPeriod, long
-   timeout, TimeUnit unit)接口，指定退出的超时时间，以防止因为一些任务执行被阻塞而无法正常退出。
+   timeout, TimeUnit unit)接口，指定退出的超时时间，以防止因为一些任务执行被阻塞而无法正常退出。  
+   
+ 二  
+ 1. 尽管Bootstrap自身不是线程安全的，但是执行Bootstrap的连接操作是串行执行的，而且connect(String inetHost, int port)方法本身是
+ 线程安全的，它会创建一个新的NioSocketChannel，并从初始构造的EventLoopGroop中选择一个NioEventLoop线程执行真正的Channel连接操作，
+ 与执行Bootstrap的线程无关，所以通过一个Bootstrap连续发起多个连接操作是安全的。  
+ 
+ 2. 在同一个Bootstrap中连续创建多个客户端连接，需要注意的是，EventLoopGroup是共享的，也就是说这些连接共用同一个NIO线程组EventLoopGroup，
+ 当某个链路发生异常或者关闭时，只需要关闭并释放Channel本身即可，不能同时销毁Channel所使用的NioEventLoop和所在的线程组EventLoopGroup。  
+ 
+ 3. Netty客户端创建流程说明如下。  
+    3.1 用户线程创建Bootstrap实例，通过API设置创建客户端相关的参数，异步发起客户端连接。  
+    3.2 创建处理客户端连接、I/O读写的Reactor线程组NioEventLoopGroup，可以通过构造函数指定I/O线程的个数，默认为CPU内核数的2倍。  
+    3.3通过Bootstrap的ChannelFactory和用户指定的Channel类型创建用于客户端连接的NioSocketChannel，它的功能类似于JDK NIO类库提供
+    的SocketChannel。  
+    3.4 创建默认的ChannelPipeline，用于调度和执行网络事件。  
+    3.5 异步发起TCP客户端连接，判断连接是否成功，如果成功，则直接将NioSocketChannel注册到多路复用器上，监听读操作位，用于数据报
+    读取和消息发送；如果没有立即连接成功，则注册连接监听位到多路复用器，等待连接结果。  
+    3.6 注册对应的网络监听状态位到多路复用器。
+    3.7 由多路复用器在I/O现场轮询各Channel，处理连接结果。  
+    3.8 如果接连成功，设置Future结果，发送连接成功事件，触发ChannelPipeline执行。  
+    3.9 由ChannelPileline调度执行系统和用户的ChannelHandler执行业务逻辑。  
+    
    
 
 
