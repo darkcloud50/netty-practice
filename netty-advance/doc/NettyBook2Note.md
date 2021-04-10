@@ -1,0 +1,33 @@
+十五  
+1. ByteBuffer的局限性：  
+1.1 ByteBuffer长度固定，一旦分配完成，它的容量不能动态扩展和收缩，当它需要编码的POJO对象大于ByteBuffer的容量时，会发生索引越界异常；  
+1.2 ByteBuffer只有一个标识位置的指针position，读写的时候需要手工调用flip()和rewind()等，使用者必须小心谨慎地处理这些API，否则容易导程序处理失败；
+1.3 ByteBuffer的API功能有限，一些高级和实用的特性它不支持，需要使用者自己编程实现。
+
+2. ByteBuf通过两个位置指针来协助缓冲区的读写操作，读写使用readerIndex，写操作使用writeIndex。
+
+3. readerIndex和writerIndex的取值一开始都是0，随着数据的写入writerIndex会增加，读数据会使readerIndex增加，但它不会超过writerIndex。在读取之后，0~readerIndex就被视为discard的，调用discardReadBytes方法，可以释放这部分空间，它的作用类似于ByteBuffer的compact方法。readerIndex和writerIndex之间的数据是可读取的，等价于ByteBuffer position 和 limit 之间的数据。writeInedex和capacity之间的空间是可写的，等价于ByteBuffer limit 和 capacity之间的可用空间。
+
+4. ByteBuf是如何实现动态扩展的：  
+4.1 通常情况下，当我们对ByteBuffer进行put操作的时候，如果缓冲区剩余可写空间不够，就会发生BufferOverflowException异常。为了避免这个问题，通常在进行put操作的时候会对剩余可用空间进行校验。如果剩余空间不足，需要重新创建一个新的ByteBuffer，并将之前的ByteBuffer复制到新创建的ByteBuffer中，最后释放老的ByteBuffer。
+4.2 ByteBuf对write操作进行了封装，由ByteBuf的write操作负责进行剩余可用空间的校验。如果可用缓冲区不足，ByteBuf会自动进行动态扩容。
+
+5. 由于NIO的Channel读写的参数都是ByteBuffer，因此，Netty的ByteBuf接口必须提供API，以方便地将ByteBuf转换成ByteBuffer，或者将ByteBuffer包装成ByteBuf。考虑到性能，应该尽量避免缓冲区的复制，内部实现的时候可以考虑聚合一个ByteBuffer的私有指针来代表ByteBuffer。
+
+6. 调用ByteBuf的read操作时，从readerIndex处开始读取。readerIndex到writerIndex之间的空间为可读的字节缓冲区；从writerIndex到capacity之间为可写的字节缓冲区；0到readerIndex之间是已经读取的缓冲区，可以调用discardReadBytes操作来重用这部分空间，以节约内存，防止ByteBuf的动态扩张。这在私有协议消息解码的时候非常有用，因为TCP底层可能粘包，几百个整包消息被TCP粘包后作为一个整包发送。这样，通过discardReadBytes操作可以重用之前已经解码过的缓冲区，从而防止接收缓冲区因为容量不足导致扩张。但是，discardReadBytes操作是把双刃剑，不能滥用。
+
+7. 需要指出的是，调用discardReadBytes会发生字节数组的内存复制，所以，频繁调用将会导致性能下降。因此在调用它之前要确认你确实需要这样做，例如牺牲性能来换取更多的可用内存。
+
+8. Clear操作：正如JDK ByteBuffer的clear操作，它不会清空缓冲区内容本身，例如填充为NUL(0x00)。它主要操作位置指针，例如position、limit和mark。对于ByteBuf，它也是用来操作readerIndex和wirterIndex，将他们还原为初始分配值。
+
+9. Mark和Rest   
+当对缓冲区进行读操作时，由于某种原因，可能需要对之前的操作进行回滚。读操作并不会改变缓冲区的内容，回滚操作主要就是重新设置索引信息。
+对于JDK的ByteBuffer，调用mark操作会将当前的位置指针备份到mark变量中，当调用reset操作之后，重新将指针的当前位置恢复为备份在mark中的值、
+Netty的ByteBuf也有类似的rest和mark接口，因为ByteBuf有读索引和写索引，因此，它总共有4个相关的方法，分别如下。  
+markReaderIndex：将当前的readerIndex备份到markedReaderIndex中；  
+resetReaderIndex：将当前的readerIndex设置为markedReaderIndex；  
+markWriterIndex：将当前的WriterIndex备份到markedWriterIndex中；  
+resetWriterIndex：将当前的writerIndex设置为markedWriterIndex 。 
+
+10. 无论是get还是set操作，ByteBuf都会对其索引和长度等进行合法性校验，与顺序读写一致。但是，set操作与write操作不同的是它不支持动态扩展缓冲区，所以使用者必须保证当前的缓冲区可写的字节数大于需要写入的字节长度，否则会抛出数组或者缓冲区越界异常。
+
