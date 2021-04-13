@@ -11,5 +11,12 @@
 
     <artifactId>netty-advance</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-all</artifactId>
+            <version>4.1.49.Final</version>
+        </dependency>
+    </dependencies>
 
 </project>
