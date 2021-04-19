@@ -1,3 +1,24 @@
+十三  
+1. Netty服务端创建的步骤  
+1.1 创建ServerBootstrap实例；  
+1.2 设置并绑定Reactor线程池；  
+1.3 设置并绑定服务端Channel；(Netty通过工厂类，利用反射创建NioServerSocketChannel对象)  
+1.4 TCP链路建立的时候创建并初始化ChannelPipeline；  
+1.5 添加并设置ChannelHandler()；  
+1.6 绑定并启动监听端口；  
+1.7 Selector轮询；  
+1.8 当轮询到准备就绪的Channel之后，就由Reactor线程的；  
+1.9 执行Netty系统ChannelHandler和用户添加定制的ChannelHandler。
+
+2. NioEventLoopGroup实际就是Reactor线程池，负责调度和执行客户端的接入、网络读写事件的处理、用户自定义任务和定时任务的执行。
+
+3. backlog指定了内核为此套接字接口排队的最大连接个数，对于给定的监听套接口，内核要维护两个队列：未连接队列和已连接队列。backlog被规定为两个队列总和的最大值。
+
+4.NioServerSocketChannel的注册：  
+ 首先判断是否是NioEventLoop自身发起的操作，如果是，则不存在并发操作，直接执行Channel注册，如果由其它线程发起，则封装成一个Task放入消息队列中异步执行。此处，由于是ServerBootstrap所在的线程执行的注册操作，所以会将其封装成Task投递到NioEventLoop中执行。  
+ 
+5. ChannelRegisted事件传递完成后，判断ServerSocketChannel监听是否成功，如果成功，需要触发NioServerSocketChannel的ChannelActive事件。
+
 十五  
 1. ByteBuffer的局限性：  
 1.1 ByteBuffer长度固定，一旦分配完成，它的容量不能动态扩展和收缩，当它需要编码的POJO对象大于ByteBuffer的容量时，会发生索引越界异常；  
@@ -31,3 +52,22 @@ resetWriterIndex：将当前的writerIndex设置为markedWriterIndex 。
 
 10. 无论是get还是set操作，ByteBuf都会对其索引和长度等进行合法性校验，与顺序读写一致。但是，set操作与write操作不同的是它不支持动态扩展缓冲区，所以使用者必须保证当前的缓冲区可写的字节数大于需要写入的字节长度，否则会抛出数组或者缓冲区越界异常。
 
+十九
+1. 当I/O操作完成之后，I/O线程会回调ChannelFuture中的GenericFutureListener的operationComplete的方法，并把ChannelFuture对象当作方法的入参。如果用户需要做上下文相关的操作，需要将上下文信息保存到对应的ChannelFuture中。
+
+2. 推荐通过GenericFutureListener代替ChannelFuture的get等方法的原因是：当我们进行异步I/O操作时，完成的时间是无法预测的，如果不设置超时时间，它会导致调用线程长时间被阻塞，甚至挂死。而设置超时时间，时间又无法准确预测。利用异步通知机制回调GenericFutureListener是最佳的解决方案，它的性能最优。
+
+3. 需要注意的是：不要在ChannelHandler中调用ChannelFutere的await()方法，它会导致死锁。原因是发起I/O操作之后，由I/O线程负责异步通知发起I/O操作的用户线程，如果用户线程和I/O线程是同一个线程，就会导致I/O线程等待自己通知操作完成，这就导致了死锁，这跟经典的两个线程互等待死锁不同，属于自己把自己挂死。
+
+4. 异步I/O操作有两类超时：一个是TCP层面的I/O超时，另一个是业务逻辑层面的操作超时。两者没有必然的联系，但是通常情况下业务逻辑超时应该大于I/O超时时间。它们两者是包含关系。
+
+5. Netty发起I/O操作的时候，会创建一个新的Promise对象，例如调用ChannelHandlerContext的write(Object object)方法时，会创建一个新的ChannelPromise。
+
+6. setSuccess0()  
+首先判断当前Promise的操作是否已经被设置，如果已经被设置，则不允许重复设置，返回设置失败。  
+由于可能存在I/O线程和用户线程同时操作Promise，所以设置操作结果的时候需要加锁保护，防止并发操作。  
+对操作结果是否被设置进行二次判断(为了提升并发性能的二次判断)，如果已经被设置，则返回操作失败。  
+对操作结果result进行判断，如果为空，说明仅仅需要notify在等待的业务线程，不包含具体的业务逻辑对象。因此，将result设置为系统默认的SUCCESS。如果操作结果为空，将结果设置为result。  
+如果有正在等待异步I/O操作完成的用户线程或者其它系统线程，则调用notifyAll方法唤醒所有正在等待的线程。注意notifyAll和wait方法都必须在同步代码块中使用。
+
+7. 通过同步关键字锁定当前Promise对象，使用循环判断对isDone结果进行判断，进行循环判断的原因是防止线程被意外唤醒导致的功能异常。
