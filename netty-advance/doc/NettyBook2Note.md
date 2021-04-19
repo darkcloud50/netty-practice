@@ -1,3 +1,24 @@
+十三  
+1. Netty服务端创建的步骤  
+1.1 创建ServerBootstrap实例；  
+1.2 设置并绑定Reactor线程池；  
+1.3 设置并绑定服务端Channel；(Netty通过工厂类，利用反射创建NioServerSocketChannel对象)  
+1.4 TCP链路建立的时候创建并初始化ChannelPipeline；  
+1.5 添加并设置ChannelHandler()；  
+1.6 绑定并启动监听端口；  
+1.7 Selector轮询；  
+1.8 当轮询到准备就绪的Channel之后，就由Reactor线程的；  
+1.9 执行Netty系统ChannelHandler和用户添加定制的ChannelHandler。
+
+2. NioEventLoopGroup实际就是Reactor线程池，负责调度和执行客户端的接入、网络读写事件的处理、用户自定义任务和定时任务的执行。
+
+3. backlog指定了内核为此套接字接口排队的最大连接个数，对于给定的监听套接口，内核要维护两个队列：未连接队列和已连接队列。backlog被规定为两个队列总和的最大值。
+
+4.NioServerSocketChannel的注册：  
+ 首先判断是否是NioEventLoop自身发起的操作，如果是，则不存在并发操作，直接执行Channel注册，如果由其它线程发起，则封装成一个Task放入消息队列中异步执行。此处，由于是ServerBootstrap所在的线程执行的注册操作，所以会将其封装成Task投递到NioEventLoop中执行。  
+ 
+5. ChannelRegisted事件传递完成后，判断ServerSocketChannel监听是否成功，如果成功，需要触发NioServerSocketChannel的ChannelActive事件。
+
 十五  
 1. ByteBuffer的局限性：  
 1.1 ByteBuffer长度固定，一旦分配完成，它的容量不能动态扩展和收缩，当它需要编码的POJO对象大于ByteBuffer的容量时，会发生索引越界异常；  
