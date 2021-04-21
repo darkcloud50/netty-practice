@@ -4,7 +4,7 @@
 1.2 设置并绑定Reactor线程池；  
 1.3 设置并绑定服务端Channel；(Netty通过工厂类，利用反射创建NioServerSocketChannel对象)  
 1.4 TCP链路建立的时候创建并初始化ChannelPipeline；  
-1.5 添加并设置ChannelHandler()；  
+1.5 添加并设置ChannelHandler；  
 1.6 绑定并启动监听端口；  
 1.7 Selector轮询；  
 1.8 当轮询到准备就绪的Channel之后，就由Reactor线程的；  
@@ -14,10 +14,41 @@
 
 3. backlog指定了内核为此套接字接口排队的最大连接个数，对于给定的监听套接口，内核要维护两个队列：未连接队列和已连接队列。backlog被规定为两个队列总和的最大值。
 
-4.NioServerSocketChannel的注册：  
+4. NioServerSocketChannel的注册：  
  首先判断是否是NioEventLoop自身发起的操作，如果是，则不存在并发操作，直接执行Channel注册，如果由其它线程发起，则封装成一个Task放入消息队列中异步执行。此处，由于是ServerBootstrap所在的线程执行的注册操作，所以会将其封装成Task投递到NioEventLoop中执行。  
  
 5. ChannelRegisted事件传递完成后，判断ServerSocketChannel监听是否成功，如果成功，需要触发NioServerSocketChannel的ChannelActive事件。
+
+6. 由于不同类型的Channel对读操作的准备工作不同，因此unsafe.beginRead也是个多态方法，对于NIO通信，无论是客户端还是服务端，都是要修改网络监听操作位为为自身感兴趣的，对于NioServerSocketChannel感兴趣的操作是OP_ACCEPT(16)，于是重新修改注册的操作位为OP_ACCEPT。
+
+7. 客户端接入步骤：处理网络读写、连接和客户端请求接入的Reactor线程就是NioEventLoop。当多路复用器检测到新的准备就绪的Channel时，默认执行processSelectedKeysOptimizes方法。由于Channel的Attachment是NioServerSocketChannel，所以执行processSelectedKey，根据就绪的操作位，执行不同的操作。由于监听的是连接操作，所以执行unsafe.read()方法。对于NioServerSocketChannel，它使用的是NioMessageUnsafe。对于doReadMessage实际就是接收新的客户端连接并创建NioSocketChannel。接收到新的客户端连接后，触发ChannelPipeline的ChannelRead方法。执行headChannelHandlerContext的fireChannelRead方法，事件在ChannelPipeline中传递，执行ServerBootstrapAcceptor的channeRead方法，该方法主要分位三个步骤：1.将启动时传入的childHandler加入客户端SocketCHannel的ChannelPipeline中；2.设置客户端的SocketChannel的TCP参数；3.注册SocketChannel到多路复用器。后续多路复用器检测到写操作调用unsafe.read()调用用户自定义handler。
+
+
+十四
+1. Netty客户端创建流程  
+1.1. 用户线程创建Bootstrap实例，通过API设置创建客户端相关的参数，异步发起客户端连接；  
+1.2. 创建处理客户端连接、I/O读写的Reactor线程组NioEventLoopGroup；
+1.3. 通过Bootstrap的ChannelFactory和用户指定的Channel类型创建用于客户端连接的NioSocketChannel；
+1.4. 创建默认的ChannelHanderPipeline，用户调度和执行网络事件；
+1.5. 异步发起TCP连接，判断连接是否成功。如果成功，则直接将NioSocketChannel注册到多路复用器上监听读操作位，用于数据报读取和发送；如果没有立即连接成功，则注册连接监听位到多路复用器上，等待连接结果；  
+1.6. 注册对应的网络监听状态到多路复用器；  
+1.7. 由多路复用器在I/O线程中轮询各Channel，处理连接结果；  
+1.8 如果连接成功，设置Future结果，发送连接成功事件，触发ChannelPipeline执行；  
+1.9 由ChannelPipeline调度执行系统和用户的ChannelHandler，执行业务逻辑。
+
+2. 客户端连接操作
+2.1 首要要创建和初始化NioSocketChannel  
+2.2 从NioEventLoopGroup中获取NioEventLoop，然后使用其作为参数创建NioSocketChannel  
+2.3 初始化Channel之后，将其注册到Selector上  
+2.4 链路创建成功后，发起异步的TCP连接  
+需要注意的是，SocketChannel执行connect操作后有以下三种结果：  
+(1) 连接成功，返回True；  
+(2)暂时没有连接上，服务端没有返回ACK应答，连接不确定，返回False；  
+(3)连接失败，直接抛出I/O异常。  
+如果是第二种情况，需要将NioSocketChannel中的selectionKey设置为OP_CONNECT，监听连接结果。  
+异步连接返回之后，需要判断连接结果，如果连接成功，则触发ChannelActive事件，最终会将NioSocketChannel中selectionKey设置为OP_READ，用于监听网络读操作。  
+如果没有立即连接上服务器，则注册OP_CONNETCT到多路复用器；如果连接过程发生异常，则关闭链路，进入连接失败处理流程。
+
 
 十五  
 1. ByteBuffer的局限性：  
