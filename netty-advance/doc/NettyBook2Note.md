@@ -46,8 +46,12 @@
 (2)暂时没有连接上，服务端没有返回ACK应答，连接不确定，返回False；  
 (3)连接失败，直接抛出I/O异常。  
 如果是第二种情况，需要将NioSocketChannel中的selectionKey设置为OP_CONNECT，监听连接结果。  
-异步连接返回之后，需要判断连接结果，如果连接成功，则触发ChannelActive事件，最终会将NioSocketChannel中selectionKey设置为OP_READ，用于监听网络读操作。  
+异步连接返回之后，需要判断连接结果，如果连接成功，则触发ChannelActive事件，最终会将NioSocketChannel中selectionKey设置为OP_READ(unsafe.beginRead)，用于监听网络读操作。  
 如果没有立即连接上服务器，则注册OP_CONNETCT到多路复用器；如果连接过程发生异常，则关闭链路，进入连接失败处理流程。
+
+3. NioEvertLoop的Selector轮询客户端连接Channel，当服务端返回握手应答之后，对连接结果进行判断；doConnect用于判断JDK的SocketChannel的连接结果，如股票返回true表示连接成功。其它值或者发生异常表示连接失败；连接成功之后，调用fullfillConnectPromise方法，触发链路激活事件，该事件由ChannelPipeline进行传播(pipeline.fireChannelActive -> 用于修改监听网络监听位为读操作)
+
+4. 客户端连接超时机制：用户在创建Netty客户端的时候，可以通过ChannelOption.CONNECT_TIMEOUT_MILLIS配置项设置超时时间，发起连接的同时，启动连接超时检测定时器，一旦超时定时器执行，说明客户端连接超时，构造连接超时异常，将异常结果设置到connectPromise中，同时关闭客户端连接。释放句柄；如果在连接超时之前获取到连接结果，则删除连接超时定时器，防止其被触发。无论连接是否成功，只要获取到连接结果，之后就删除连接超时定时器。
 
 
 十五  
