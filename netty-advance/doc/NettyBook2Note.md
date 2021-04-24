@@ -115,9 +115,50 @@ AbstractNioChannel注册的是0，说明对任何事件都不感兴趣，仅仅�
 doBeginRead():将Selectionkey当前的操作位与读操作位进行按位与操作，如果等于0，说明目前没有设置读操作位，通过interestOps | readInterestOps设置读操作位，最后调用selectionKey的interestOps方法重新设置网络通道的网络操作位，这样就可以监听网络的读事件了。
 
 3. AbstractNioByteChannel
-5. NioServerSocketChannel：  
-首先通过NioServerSocketChannel的accept接收新的客户端连接，如果SocketChannel不为空，则利用当前的NioServerSocketChannel、EveentLoop和SocketChannel创建新的NioSocketChannel，并将其加入到List<Object>中，最后返回1，表示服务端消息读取成功。  
-对于NioServerSocketChannel，它的读取操作就是接收客户端的连接，创建NioServerSocketChannel对象。
+
+4. NioServerSocketChannel：  
+首先通过NioServerSocketChannel的accept接收新的客户端连接，如果SocketChannel不为空，则利用当前的NioServerSocketChannel、EveentLoop和SocketChannel创建新的NioSocketChannel，并将其加入到List\<Object\>中，最后返回1，表示服务端消息读取成功。对于NioServerSocketChannel，它的读取操作就是接收客户端的连接，创建NioServerSocketChannel对象。
+
+十七
+
+十八  
+1. Reactor多线程模型的特点如下：  
+1.1 有专门的一个NIO线程——Acceptor线程用于监听服务端，接收客户端TCP连接请求；  
+1.2 网络I/O操作——读、写由一个NIO线程池负责，线程池可以采用标准的JDK线程池实现，它包含一个任务队列和N个可用的线程，由这些NIO线程负责消息的读取、解码、编码和发送；
+1.3 一个NIO线程可以同时处理N条链路，但是一个链路只能对应NIO线程，防止发生并发操作问题；
+
+2. 主从Reactor线程模型的特点是：服务端用于接收客户端连接的不再是一个单独的NIO线程，而是一个独立的NIO线程池。Acceptor接收到客户端TCP连接请求并处理完成后(可能包含接入认证等)，将新创建的SocketChannel注册到I/O线程池（sub reactor线程池）的某个I/O线程上，由它负责SocketChannel的读写和编解码工作。Acceptor线程池仅仅用于客户端的登录、握手、和安全认证，一旦链路建立成功，就将链路注册到后端subReactor线程池的I/O线程上，由I/O线程负责后续的I/O操作。利用主从NIO线程模型，可以解决一个服务端监听线程无法有效处理所有客户端连接的性能不足问题。
+
+3. Netty用于接收客户端请求的线程池职责如下：  
+3.1 接收客户端TCP连接，初始化Channel参数；  
+3.2 将链路状态变更事件通知给ChannelPipeline。
+
+4. Netty处理I/O操作的Reactor线程池职责如下：  
+4.1 异步读取通信对端的数据报，发送读事件到ChannelPipeline；  
+4.2 异步发送消息到通信对端，调用ChannelPipeline的消息发送接口；  
+4.3 执行系统调用Task；  
+4.4 执行定时任务Task，例如链路空闲状态检测定时任务。
+
+5. 所有的逻辑都是在for循环体内进行（io.netty.channel.nio.NioEventLoop.run），只有当NioEventLoop接收到退出指令的时候才会退出循环，否则一直执行下去。  
+
+6. 通过hasTasks()方法判断当前的消息队列中是否有消息尚未处理，如果有则调用selectNow()方法立即进行一次select操作，看看是否有准备就绪的Channel需要处理。Selector的selectNow()方法会立即触发Selector的选择操作，如果有准备就绪的Channel，则返回就绪Channel的集合，否则返回0。如果消息队列中没有消息需要处理，则执行select()方法，由Selector多路复用器轮询，看是否有准备就绪的Channel；获取系统当前的纳秒时间，调用delayNanos方法计算NioEventLoop中定时任务的触发时间；计算下一个将要触发的定时任务的剩余时间，将它转换成毫秒，将超时时间增加0.5毫秒的调整值。对剩余的超时时间进行判断，如果需要立即执行或者已经超时，则调用selector.selectNow()进行轮询操作，将selectCnt设置为1，并退出当前循环。将定时任务剩余的超时时间作为参数进行select操作，每完成一次select操作，对select计数器selectCnt加1。
+
+7. select操作完成后，需要对结果进行判断，如果存在下列任意一种情况，则退出当前循环：  
+7.1 有Channel处于就绪状态，selectedkeys不为0，说明有读写事件需要处理；  
+7.2 oldWakeUp为true；  
+7.3 系统或用户调用了wakeup操作；  
+7.4 消息队列中有新的任务需要处理。  
+
+8. JDK空轮询的Bug修复策略：  
+8.1 对Selector的select操作洲际进行统计；  
+8.2 没完成一次空的select操作进行一次计数；  
+8.3 在某个周期（例如100ms）内如果连续发生N次空轮询，说明触发了JDK NIO的epoll死循环bug。
+
+9. 检测到Selector处于死循环后，需要通过重建Selector的方式让系统恢复正常。调用OpenSelector方法创建并发开新的Selector，通过循环，将原Selector上注册的SocketChannel从旧的Selector上去注册，重新注册到新的Selector上，并将老的Selector关闭。通过销毁旧的、有问题的多路复用器，使用新建的Selector，就可以解决空轮询Selector导致的I/O线程CPU占用100%的问题。
+
+10. 由于NioEventLoop需要同时处理I/O事件和非I/O事件，为了保证两者都能够得到足够的CPU事件被执行，Netty提供了I/O比例供用户定制。如果I/O操作多于定时任务和Task，则可以将I/O比例调大，反之则调小，默认为50%。
+
+11. 从定时任务消息队列中弹出消息进行处理，，如果消息队列为空，则退出循环。根据当前的事件戳进行判断，如果该定时任务已经或处于超时状态，则将其加入到执行Task Queue中，同时从延时队列中删除。定时任务如果没有超时，说明本轮循环不需要处理，直接退出即可。执行Task Queu中原有的任务和从延时队列中复制的已经超时或者正在处于超时状态的定时任务。最后判断系统是否进行优雅停机状态，如果处于关闭状态，则需要调用closeAll方法，释放资源，并让NioEventLoop线程退出循环，结束运行。遍历获取所有的Channel，调用它的Unsage.close()方法关闭所有链路，释放线程池、ChannelPipeline和ChannelHandler等资源。
 
 十九
 1. 当I/O操作完成之后，I/O线程会回调ChannelFuture中的GenericFutureListener的operationComplete的方法，并把ChannelFuture对象当作方法的入参。如果用户需要做上下文相关的操作，需要将上下文信息保存到对应的ChannelFuture中。
