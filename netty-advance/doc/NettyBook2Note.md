@@ -119,7 +119,23 @@ doBeginRead():将Selectionkey当前的操作位与读操作位进行按位与操
 4. NioServerSocketChannel：  
 首先通过NioServerSocketChannel的accept接收新的客户端连接，如果SocketChannel不为空，则利用当前的NioServerSocketChannel、EveentLoop和SocketChannel创建新的NioSocketChannel，并将其加入到List\<Object\>中，最后返回1，表示服务端消息读取成功。对于NioServerSocketChannel，它的读取操作就是接收客户端的连接，创建NioServerSocketChannel对象。
 
-十七
+5. 就像循环读一样，我们需要对一次Selector轮询的写操作次数进行上限控制，因为如果TCP的发送缓冲区满，TCP处于KEEP-ALIVE状态，消息会无法发送出去，如果不对上限进行控制，就会长时间处于发送状态，Reactor线程无法及时读取其它消息和执行排队的Task。所以，我们必须对循环次数上限做控制。对写入的字节进行判断，如果为0，说明TCP发送缓冲区已满，很有可能无法再写进去，因此从循环中跳出，同时将写半包标识设置为true，用于向多路复用器注册写操作位，告诉多路复用器有没有发送完的半包消息，需要轮询出就绪的SocketChannel继续发送。
+
+6. AbstractUnsafe：  
+6.1 register：首先判断当前所在的线程是否是Channel对应的NioEventLoop线程，如果是同一个线程，则不存在多线程并发操作问题，直接调用register0进行注册；如果是由用户线程或者其它线程发起的注册操作，则将注册操作封装成Runnable，放到NioEventLoop任务队列中执行。  
+6.2 bind：bind方法主要用于绑定指定的端口，对于服务端，用于绑定监听端口，可以设置backlog参数，对于客户端，主要用于指定客户端Channel的本地Socket地址。  
+6.3 close：在链路关闭之前首先需要判定是否处于刷新状态，如果处于刷新状态说明还有消息尚未发送出去，需要等到所有消息发送完成再关闭链路，因此，将关闭操作封装成Runnable稍后再执行。如果链路没有处于刷新状态，需要从closeFuture中判断关闭操作是否完成，如果已经完成，不需要重复关闭链路，设置ChannelPromise的操作结果为成功并返回。执行关闭操作，将消息发送缓冲数组设置为空，通知JVM进行内存回收。调用抽象的doClose关闭链路。如果关闭操作成功，设置ChannelPromise结果为成功。如果操作失败，则设置异常对象到ChannelPromise中。调用ChannelOutboundBuffer的close方法释放缓冲区的消息，随后构造链路关闭通知Runnable放到NioEventLoop中执行。最后，调用deregister方法，将Channel从多路复用器上取消注册。  
+6.4 write：wirte方法实际上将消息添加到环形发送数组中，并不是真正的写Channel。  
+6.5 flush：负责发送缓冲区中待发送的消息全部写入到Channel中，并发送给通信对方。（拿，写，清除半包）
+
+十七  
+1. ChannelPipeline是ChannelHandler的容器，它负责ChannelHandler的管理和事件拦截与调度。
+
+2. 事实上，用户不需要自己创建pipeline，因为使用ServerBootstrap或者bootstrap启动服务器或者客户端时，Netty会为每个Channel连接创建一个独立的pipeline。
+
+3. ChannelPipeline支持动态运行动态添加或者动态添加ChannelHandler，在某些场景下这个特性非常实用。例如业务高峰期需要对系统做拥塞保护时，就可以根据当前的系统时间进行判断，如果处于业务高峰期，则动态地将系统拥塞保护Channelhandler添加到当前的ChannelPipeline中，当高峰期过去之后，就可以动态删除拥塞保护的ChannelHandler了。
+
+4. ChannelPipeline是线程安全的，这意味着N个业务线程可以并发地操作ChannelPipeline而不存在多线程并发问题。但是，ChannelHandler而不是线程安全的，这意味着尽管CHannelPipeline是线程安全的，但是用户仍然需要自己保证ChannelHandler的线程安全。
 
 十八  
 1. Reactor多线程模型的特点如下：  
